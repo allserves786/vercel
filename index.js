@@ -1,4 +1,5 @@
 // Ghost-MD — Pair Code Frontend Proxy (HTTP only)
+// Security hardened + free-deploy ready
 
 const express = require('express');
 const axios = require('axios');
@@ -7,7 +8,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ═══════════════════════════════════════════════════════════
-//  ALL SERVER LINKS — ONLY HERE
+//  ALL SERVER LINKS — ONLY HERE (never sent to browser)
 // ═══════════════════════════════════════════════════════════
 
 const serverUrls = {
@@ -22,47 +23,69 @@ const serverUrls = {
   server6:  'https://boyserver5-bb0692cdeca2.herokuapp.com',
   server7:  'https://boyserver6-7aabf69ca221.herokuapp.com',
   server8:  'https://boyserver7-a91fb4a10dd0.herokuapp.com',
-  server9: 'https://boyserver8-53f21f5a846c.herokuapp.com',
-  server10: 'https://boyserver9-9a3af5673169.herokuapp.com'
+  server9:  'https://boyserver8-53f21f5a846c.herokuapp.com',
+  server10: 'https://boyserver9-9a3af5673169.herokuapp.com',
 };
 
 const allServers = [
   // NEW — top 5
-  { id: 'server1',  name: 'GHOST SERVER 01 ★ NEW' },
-  { id: 'server2',  name: 'GHOST SERVER 02 ★ NEW' },
-  { id: 'server3',  name: 'GHOST SERVER 03 ★ NEW' },
-  { id: 'server4',  name: 'GHOST SERVER 04 ★ NEW' },
-  { id: 'server5',  name: 'GHOST SERVER 05 ★ NEW' },
+  { id: 'server1',  name: 'GHOST SERVER 01' },
+  { id: 'server2',  name: 'GHOST SERVER 02' },
+  { id: 'server3',  name: 'GHOST SERVER 03' },
+  { id: 'server4',  name: 'GHOST SERVER 04' },
+  { id: 'server5',  name: 'GHOST SERVER 05' },
 
   // Rest
   { id: 'server6',  name: 'GHOST SERVER 06' },
   { id: 'server7',  name: 'GHOST SERVER 07' },
   { id: 'server8',  name: 'GHOST SERVER 08' },
-  { id: 'server19', name: 'GHOST SERVER 9' },
-  { id: 'server20', name: 'GHOST SERVER 10' },
+  { id: 'server9',  name: 'GHOST SERVER 09' },
+  { id: 'server10', name: 'GHOST SERVER 10' },
 ];
 
 const serverNames = {};
 allServers.forEach(s => { serverNames[s.id] = s.name; });
 
-app.use(express.json());
-app.use(express.static(__dirname));
+// ─── Security headers ───
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  // Block probing of source / config files
+  if (/\.(env|git|json|js|md|lock|log|yml|yaml|toml|config)$/i.test(req.path) && req.path !== '/') {
+    return res.status(404).end();
+  }
+  next();
+});
+
+app.use(express.json({ limit: '16kb' }));
+
+// Only serve public HTML — never the whole project folder (index.js etc stay private)
+app.use(express.static(path.join(__dirname, 'public'), {
+  index: false,
+  extensions: ['html'],
+  setHeaders: (res) => {
+    res.setHeader('Cache-Control', 'no-store');
+  }
+}));
 
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.sendStatus(200);
   next();
 });
 
-// ─── Server list ───
+// ─── Server list (NO real backend URLs exposed) ───
 app.get('/servers', (req, res) => {
   try {
     const servers = allServers.map(s => ({
       id: s.id,
-      name: s.name,
-      url: serverUrls[s.id] || ''
+      name: s.name
+      // url intentionally removed — never send backend addresses to client
     }));
     return res.json({ servers, success: true });
   } catch (e) {
@@ -138,11 +161,16 @@ app.get('/code', async (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'mini.html'));
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', servers: Object.keys(serverUrls).length });
+});
+
+// Block everything else (no source leaks)
+app.use((req, res) => {
+  res.status(404).json({ error: 'Not found' });
 });
 
 app.listen(PORT, () => {
